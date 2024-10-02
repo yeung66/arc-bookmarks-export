@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Arc 书签导出</title>
+    </head>
+    <body>
+        <textarea id="bookmark" style="width: 100%; height: 600px"></textarea>
+        <button id="export">导出</button> <button id="copy">复制</button>
+        <button id="download">下载</button>
+        <pre id="result" style="border: solid 2px;padding: 10px;width: fit-content;"></pre>
+
+        <script>
+            let exportBtn = document.getElementById("export")
+            exportBtn.onclick = function () {
+                try {
+                    let bookmark = document.getElementById("bookmark")
+                    let bookmarksJson = JSON.parse(bookmark.value)
+
+                    let source = bookmarksJson?.sidebar?.containers[1]
+
+                    let groups = source.items
+                        .filter((item) => !(typeof item === "string"))
+                        .map((item) => {
+                            return {
+                                id: item.id,
+                                title: item.title,
+                                parentID: item.parentID,
+                                createdAt: item.createdAt,
+                                url: item.data?.tab?.savedURL,
+                                parentGroup: null,
+                                childrenGroup: [],
+                            }
+                        })
+                        .filter((item) => item.url === undefined)
+                        .filter((item) => item.title !== null)
+                        .reduce(
+                            (acc, item) => ({
+                                ...acc,
+                                [item.id]: item,
+                            }),
+                            {}
+                        )
+
+                    for (let group of Object.values(groups)) {
+                        group.parentGroup = groups[group.parentID]
+                        if (group.parentGroup) {
+                            group.parentGroup.childrenGroup.push(group)
+                        }
+                    }
+
+                    let bookmarks = source.items
+                        .filter((item) => !(typeof item === "string"))
+                        .map((item) => {
+                            return {
+                                id: item.id,
+                                title:
+                                    item.title === null
+                                        ? item.data?.tab?.savedTitle
+                                        : item.title,
+                                parentID: item.parentID,
+                                createdAt: item.createdAt,
+                                url: item.data?.tab?.savedURL,
+                            }
+                        })
+                        .filter((item) => item.url !== undefined)
+                        .filter((item) => item.title !== null)
+
+                    let groupBookmarks = Object.values(groups).reduce(
+                        (acc, group) => {
+                            let children = bookmarks.filter(
+                                (bookmark) => bookmark.parentID === group.id
+                            )
+                            return children.length === 0
+                                ? acc
+                                : {
+                                      ...acc,
+                                      [group.id]: children,
+                                  }
+                        },
+                        {}
+                    )
+
+                    let genBookmarksHtml = (content) => {
+                        return `<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+<TITLE>Bookmarks</TITLE>
+<H1>Bookmarks</H1>
+<DL><p>
+${content}
+</DL><p>`
+                    }
+
+                    let indentStr = "  "
+
+                    let genGroupHtml = (group, indent = 1) => {
+                        let content = [
+                            `<DT><H3>${group.title}</H3>`,
+                            "<DL><p>",
+                            ...group.childrenGroup.map((g) =>
+                                genGroupHtml(g, indent + 1)
+                            ),
+                        ]
+
+                        let end = "\n</DL><p>"
+
+                        let bookmarks = groupBookmarks[group.id]
+                        if (!bookmarks) {
+                            return (content.join("\n") + end)
+                                .split("\n")
+                                .map((line) => indentStr.repeat(indent) + line)
+                                .join("\n")
+                        }
+
+                        let bookmarksHtml = bookmarks
+                            .map((bookmark) => {
+                                return (
+                                    indentStr +
+                                    `<DT><A HREF="${
+                                        bookmark.url
+                                    }" ADD_DATE="${parseInt(
+                                        bookmark.createdAt
+                                    )}">${bookmark.title}</A>`
+                                )
+                            })
+                            .join("\n")
+
+                        return (content.concat(bookmarksHtml).join("\n") + end)
+                            .split("\n")
+                            .map((line) => indentStr.repeat(indent) + line)
+                            .join("\n")
+                    }
+
+                    let content = Object.values(groups)
+                        .filter((group) => groups[group.parentID] === undefined)
+                        .map((g) => genGroupHtml(g))
+                        .join("\n")
+
+                    //添加所有的根目录下的 pin 页面，打开的标签页，以及固定的应用页
+                    for (let b of bookmarks) {
+                        if (groups[b.parentID] === undefined) {
+                            content += `${indentStr}<DT><A HREF="${
+                                b.url
+                            }" ADD_DATE="${parseInt(b.createdAt)}">${
+                                b.title
+                            }</A>\n`
+                        }
+                    }
+
+                    let html = genBookmarksHtml(content)
+
+                    let result = document.getElementById("result")
+                    result.innerText = html
+                } catch (error) {
+                    console.error(error)
+                    alert("请粘贴正确的 json 书签数据")
+                }
+            }
+
+            let copyBtn = document.getElementById("copy")
+            copyBtn.onclick = function () {
+                let result = document.getElementById("result")
+                if (result.innerText === "") {
+                    alert("请先导出书签")
+                    return
+                }
+
+                let range = document.createRange()
+                range.selectNode(result)
+                window.getSelection().removeAllRanges()
+                window.getSelection().addRange(range)
+                document.execCommand("copy")
+                window.getSelection().removeAllRanges()
+                alert("已复制到剪贴板")
+            }
+            
+            let downloadBtn = document.getElementById("download")
+            downloadBtn.onclick = function () {
+                let result = document.getElementById("result")
+                if (result.innerText === "") {
+                    alert("请先导出书签")
+                    return
+                }
+                
+                let blob = new Blob([result.innerText], { type: "text/html" })
+                let url = URL.createObjectURL(blob)
+                let a = document.createElement("a")
+                a.href = url
+                a.download = "bookmarks.html"
+                a.click()
+                URL.revokeObjectURL(url)
+            }
+        </script>
+    </body>
+</html>
